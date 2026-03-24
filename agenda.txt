@@ -1,0 +1,33 @@
+The following is a agenda to assign and keep track of necessary tasks in order to complete the project:
+
+- Finalize what data we want (and may will want in the future) to collect and process
+Current/Past Temperature
+Current/Past Wind Speed
+Time of day
+Day of year
+Pressure
+Wind direction*
+Humidity
+Cloud coverage
+STARTING WITH:
+*Current Temperature
+*Wind Speed
+*Time of day (sin and cos)
+Set aside 2025 data for validation, use earlier years to train
+
+- Frequency of collected data (i.e. hourly, daily)
+Sample code provided retrives data on an hourly basis only.
+
+- Finalize how data will be collected and preprocessed
+Open-meteo API, do we want to download and store a large amount of data so that API requests aren't required each test?
+
+- Determine an initial model to be used - i.e. what predictor variables to use, linear/non-linear model
+Starting with 4 predictor variables, test accuracy of models over various horizons at different times of the year (i.e. on a seasonal basis) and try to notice trends/other variables to consider
+Linear model to start, will update model iteratively with new/different parameters and determine a different (non-linear) model is required later.
+
+Start report
+
+- Determine best way to solve for predictor variables
+Likely least squares (np.linalg.lstsq), but should consider other linear (and maybe non-linear in future) solving methods (such as gradiant)
+
+- Iterate model

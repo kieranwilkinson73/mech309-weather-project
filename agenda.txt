@@ -13,6 +13,8 @@ STARTING WITH:
 *Current Temperature
 *Wind Speed
 *Time of day (sin and cos)
+*Intercept variable
+*1 Hour Lag
 Set aside 2025 data for validation, use earlier years to train
 
 - Frequency of collected data (i.e. hourly, daily)
@@ -22,12 +24,17 @@ Sample code provided retrives data on an hourly basis only.
 Open-meteo API, do we want to download and store a large amount of data so that API requests aren't required each test?
 
 - Determine an initial model to be used - i.e. what predictor variables to use, linear/non-linear model
-Starting with 4 predictor variables, test accuracy of models over various horizons at different times of the year (i.e. on a seasonal basis) and try to notice trends/other variables to consider
+Starting with 8 predictor variables, test accuracy of models over various horizons at different times of the year (i.e. on a seasonal basis) and try to notice trends/other variables to consider
 Linear model to start, will update model iteratively with new/different parameters and determine a different (non-linear) model is required later.
+First model will only predict 1 hour forecast to try to notice trends, will add more forecast horizons iteratievly until a desired amount is reached
 
 Start report
 
 - Determine best way to solve for predictor variables
 Likely least squares (np.linalg.lstsq), but should consider other linear (and maybe non-linear in future) solving methods (such as gradiant)
+
+- Calculate error in RMSE and MAE, use these values as guidelines as to determine what iterations have more significant improvements in error reduction
+
+- Document each test and error values provided
 
 - Iterate model

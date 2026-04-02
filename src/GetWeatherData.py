@@ -31,14 +31,13 @@ def fetch_open_meteo_hourly(
     hourly_vars: List[str] | None = None,
 ) -> pd.DataFrame:
     if hourly_vars is None:
-        hourly_vars = [ # Removed some for basic model, will re-add in future iterations
+        hourly_vars = [
             "temperature_2m",
             "wind_speed_10m",
-            # "wind_direction_10m",
-            # "relative_humidity_2m",
-            # "surface_pressure",
-            # "precipitation",
-            # "cloud_cover",
+            "relative_humidity_2m",
+            "surface_pressure",
+            "precipitation",
+            "cloud_cover",
         ]
 
     url = "https://archive-api.open-meteo.com/v1/archive"
@@ -80,16 +79,13 @@ def preprocess(df: pd.DataFrame, horizons: list[int]) -> pd.DataFrame: # Added h
     df = df.interpolate(limit=6)
     df = df.ffill().bfill()
 
-
-    # Removed some for basic model, will re-add in future iterations
     rename = {
         "temperature_2m": "T",
         "wind_speed_10m": "W",
-        # "wind_direction_10m": "Wd",
-        # "relative_humidity_2m": "RH",
-        # "surface_pressure": "P",
-        # "precipitation": "Prec",
-        # "cloud_cover": "Cloud",
+        "relative_humidity_2m": "RH",
+        "surface_pressure": "P",
+        "precipitation": "Prec",
+        "cloud_cover": "Cloud",
     }
     df = df.rename(columns={k: v for k, v in rename.items() if k in df.columns})
 
@@ -108,19 +104,16 @@ def preprocess(df: pd.DataFrame, horizons: list[int]) -> pd.DataFrame: # Added h
     df["sin_year"] = np.sin(omega_y * doy)
     df["cos_year"] = np.cos(omega_y * doy)
 
-    # Add lag for 1 hour forecast
+    # Add temperature lags for predictor variables
     add_lags(df, 'T', [1])
+    add_lags(df, 'T', [3])
+    add_lags(df, 'T', [12])
 
     for i in horizons:
-        # Create the various forecast horizon columns in the data
-        # df2 = df.copy()
-        # df2["T_plus"+str(i)] = df2["T"].shift(-i)
-        # df = pd.concat([df, df2], ignore_index=True)
-
-        df["T_plus"+str(i)] = df["T"].shift(-i)
+        df["T_plus"+str(i)] = df["T"].shift(-i) # Create temperature shifts in order to properly validate data
 
     # Define feature columns as columns whose data is used with respective preconditioner variables
-    feature_columns = ['T', 'W', 'sin_day', 'cos_day', 'sin_year', 'cos_year', 'T_lag1']
+    feature_columns = ['T', 'W', 'sin_day', 'cos_day', 'sin_year', 'cos_year', "RH", "P", "Prec", "Cloud", 'T_lag1', 'T_lag3', 'T_lag12']
 
     # Remove any empty rows
     df = df.dropna(subset=feature_columns + ['T_plus' + str(c) for c in horizons]).copy()
@@ -150,11 +143,6 @@ def fit_linear_regression(X: np.ndarray, y: np.ndarray) -> np.ndarray:
     return beta # Return the beta variables
 
 # Use regression model to predict y
-def predict_linear_regression(X: np.ndarray, beta: np.ndarray) -> np.ndarray:
-    X_aug = np.column_stack([np.ones(len(X)), X]) # Define the matrix with an extra column of 1s to include the intercept term
-    return X_aug @ beta # Calculate y_hat given the matrix and beta variables
-
-# Use regression model to predict y
 def predict(A: np.ndarray, x: np.ndarray):
     return A @ np.insert(x, 0, 1).reshape(-1, 1) # Calculate the predicted temperature given set of predictor variables
 
@@ -168,9 +156,9 @@ def mae(y_true: np.ndarray, y_pred: np.ndarray) -> float:
 
 
 if __name__ == "__main__":
-    start_date = "2024-06-01"
-    end_date = "2025-08-30"
-    val_hours = 24*14 # Using last 14 days for validation
+    start_date = "2018-01-01"
+    end_date = "2025-12-30"
+    val_hours = 24*365 # Using last year days for validation
     forecast_horizons = [1, 3, 6, 12, 24] # Various forecast horizons to be modeled
     
     montreal = Location(
@@ -195,51 +183,31 @@ if __name__ == "__main__":
     plt.show()
 
     # Define an empty matrix
-    model_matrix = np.empty((0, len(feature_cols)+ 1)) # Set to 8 for now, maybe add a way that auto-calculates
+    model_matrix = np.empty((0, len(feature_cols)+ 1))
 
+    # Organizing data
     train_df, val_df = split_train_val(df, val_hours=val_hours) # Split data region into training and validation
+    X_train = train_df[feature_cols].to_numpy() # Assign the training matrix data from preprocessed dataframe file to useable numpy matrix
     X_val = val_df[feature_cols].to_numpy() # Assign the validating matrix data from preprocessed dataframe file to useable numpy matrix
     y_actual = [None for _ in range(len(forecast_horizons))] # Create list to store actual y values during validation period
-
+    T_baseline = [None for _ in range(len(forecast_horizons))] # Create list to store baseline temperature values for validation period
 
     # Loop through different forecast horizons and create one model for each
     for i in forecast_horizons:
         target_col = "T_plus" + str(i) # Set the target column as the current forecast horizon
         
-        # Organizing data
-        train_df, val_df = split_train_val(df, val_hours=val_hours) # Split data region into training and validation
-        X_train = train_df[feature_cols].to_numpy() # Assign the training matrix data from preprocessed dataframe file to useable numpy matrix
+        # Create target temperatures for training and validation
         y_train = train_df[target_col].to_numpy() # Assign the training temperature values from dataframe file to a useable numpy array
-        X_val = val_df[feature_cols].to_numpy() # Assign the validating matrix data from preprocessed dataframe file to useable numpy matrix
         y_val = val_df[target_col].to_numpy() # Assign the validating temperature values from dataframe file to a useable numpy array
+        T_baseline[forecast_horizons.index(i)] = val_df["T"].to_numpy() # Create a baseline temperature dataset to compare the models predictions to
 
         # Model calculation
         beta = fit_linear_regression(X_train, y_train) # Calculate the beta variables associated with each predictor variable (weight) via least square method
-        yhat_val = predict_linear_regression(X_val, beta) # Calculate the predicted temperature values within the validation period
         y_actual[forecast_horizons.index(i)] = y_val # Add the current set of correct y values to later use for validation
         
         # Append row to model matrix
         model_matrix = np.vstack([model_matrix, beta])
 
-        # Error calculation
-        error_rms = rmse(y_val, yhat_val) # Calculate the root mean square error of the predicted temperatures to the validation temperatures
-        error_ma = mae(y_val, yhat_val) # Calculate the mean absolute error of the predicted temperatures to the validation temperatures
-        print(str(i)+"-hour temperature forecast errors:")
-        print('Root Mean Square Error (RMSE):', error_rms) # Display RMSE in the terminal
-        print('Mean Absolute Error (MAE):', error_ma, '\n') # Display MAE in the terminal
-
-        # Plotting the actual temperature against the predicted temperature
-        # plot_df = pd.DataFrame({
-        #             "Actual": y_val,
-        #             "Model": yhat_val,
-        #         }, index=val_df.index)
-        # plt.figure(figsize=(10, 4))
-        # plot_df.iloc[:7 * 24].plot(ax=plt.gca(), linewidth=1)
-        # plt.title(str(i)+"-hour temperature forecast: validation sample")
-        # plt.ylabel("T [°C]")
-        # plt.tight_layout()
-        # # plt.show()
-    # print(model_matrix)
 
     # Create list of lists to store the various predicted temperatures for each forecast horizon
     y_predicted = [np.array([]) for _ in range(len(forecast_horizons))]
@@ -249,15 +217,27 @@ if __name__ == "__main__":
         for g in range(len(forecast_horizons)): # Looping through each forecast horizon for each set of datapoints
             y_predicted[g] = np.append(y_predicted[g], predict(model_matrix, i)[g]) # Predict temperature for set horizon and append it to list of results
 
+    # Error Calculation
+    for j in range(len(forecast_horizons)):
+        model_root_error = rmse(y_actual[j], y_predicted[j]) # Calculate the root mean square error of the predicted temperatures to the validation temperatures
+        model_absolute_error = mae(y_actual[j], y_predicted[j]) # Calculate the mean absolute error of the predicted temperatures to the validation temperatures
+        baseline_root_error = rmse(y_actual[j], T_baseline[j]) # Calculate the root mean square error of the baseline temperatures to the validation temperatures
+        baseline_absolute_error = mae(y_actual[j], T_baseline[j]) # Calculate the mean absolute error of the baseline temperatures to the validation temperatures
+        print(str(forecast_horizons[j])+"-hour temperature forecast errors:")
+        print('Model Root Mean Square Error (RMSE):', model_root_error) # Display RMSE in the terminal
+        print('Model Mean Absolute Error (MAE):', model_absolute_error) # Display MAE in the terminal
+        print('Baseline Root Mean Square Error (RMSE):', baseline_root_error) # Display RMSE in the terminal
+        print('Baseline Mean Absolute Error (MAE):', baseline_absolute_error, '\n') # Display MAE in the terminal
 
     # Plotting the actual temperature against the predicted temperature
     for i in range(len(forecast_horizons)):
         plot_df = pd.DataFrame({
                     "Actual": y_actual[i],
                     "Model": y_predicted[i],
+                    # "Baseline": T_baseline[i],
                 }, index=val_df.index)
         plt.figure(figsize=(10, 4))
-        plot_df.iloc[:7 * 24].plot(ax=plt.gca(), linewidth=1)
+        plot_df.iloc[:val_hours].plot(ax=plt.gca(), linewidth=1)
         plt.title(str(forecast_horizons[i])+"-hour temperature forecast: validation sample")
         plt.ylabel("T [°C]")
         plt.tight_layout()
